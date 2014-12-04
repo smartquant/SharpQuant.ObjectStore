@@ -38,9 +38,10 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Catalogue.cs" />
     <Compile Include="DbObjectStore.cs" />
     <Compile Include="IObjectStore.cs" />
-    <Compile Include="InfoSerializer.cs" />
+    <Compile Include="TagsSerializer.cs" />
     <Compile Include="IObjectSerializer.cs" />
     <Compile Include="ObjectInfo.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

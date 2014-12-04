@@ -14,7 +14,7 @@ using System.Security;
 //{
 //    public class ProtoObjectSerializer : IObjectSerializer
 //    {
-//        public unsafe T Deserialize<T>(byte[] data)
+//        public T Deserialize<T>(byte[] data)
 //        {
 //            using (var stream = new MemoryStream(data))
 //            {
@@ -22,7 +22,7 @@ using System.Security;
 //            }           
 //        }
 
-//        public unsafe byte[] Serialize<T>(T obj)
+//        public byte[] Serialize<T>(T obj)
 //        {
 //            using (var stream = new MemoryStream())
 //            {

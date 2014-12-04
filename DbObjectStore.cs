@@ -9,12 +9,14 @@ namespace SharpQuant.ObjectStore
 {
     /// <summary>
     /// Objectstore with versioning based on a ADO DB
+    /// This is an example implementation based on SQLite
+    /// Remark: For better performance one would typically use stored procedures in DBs which support that
     /// </summary>
     public class DbObjectStore : IObjectStore, IDisposable
     {
         protected IDbConnection _conn;
         protected IObjectSerializer _serializer;
-        protected IInfoSerializer _infoSerializer;
+        protected ITagsSerializer _tagsSerializer;
 
         #region SQL
 
@@ -22,7 +24,26 @@ namespace SharpQuant.ObjectStore
         //since table is passed as a string this might lead to SQL injection 
         //so table name should be checked on special characters
 
-        protected static string EXIST_TABLE = "SELECT name FROM sqlite_master WHERE tbl_name=? AND type='table'";
+        protected static string DDL_CATALOGUE =
+            @"DROP TABLE IF EXISTS [tblCatalogue];
+                CREATE TABLE [tblCatalogue] (
+                ID          INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                CODE        TEXT NOT NULL,
+                Name        TEXT,
+                Description TEXT,
+                Info        TEXT
+            );
+            CREATE UNIQUE INDEX [idxCatalogue] on [tblCatalogue] (CODE ASC);
+            ";
+
+        protected static string READ_CATALOGUES = "SELECT ID,CODE,Name,Description,Info FROM tblCatalogue";
+        protected static string READ_CATALOGUE = "SELECT ID,CODE,Name,Description,Info FROM tblCatalogue WHERE CODE=?";
+        protected static string INSERT_CATALOGUE = "INSERT INTO tblCatalogue(CODE,Name,Description,Info) VALUES(?,?,?,?)";
+        protected static string UPDATE_CATALOGUE = "UPDATE tblCatalogue SET(Name=?,Description=?,Info=?) WHERE CODE=?";
+        protected static string DELETE_CATALOGUE = "DELETE FROM tblCatalogue WHERE CODE=?";
+        protected static string DROP_CATALOGUE = "DROP TABLE IF EXISTS [{0}]";
+
+
         protected static string DDL =
             @"DROP TABLE IF EXISTS [{0}];
             CREATE TABLE [{0}] (
@@ -55,11 +76,11 @@ namespace SharpQuant.ObjectStore
 
         #region constructor
 
-        public DbObjectStore(Func<IDbConnection> connect, IObjectSerializer objectSerializer, IInfoSerializer infoSerializer)
+        public DbObjectStore(Func<IDbConnection> connect, IObjectSerializer objectSerializer, ITagsSerializer infoSerializer)
         {
             _conn = connect();
             _serializer = objectSerializer;
-            _infoSerializer = infoSerializer;
+            _tagsSerializer = infoSerializer;
 
         }
 
@@ -71,55 +92,21 @@ namespace SharpQuant.ObjectStore
             return _conn.BeginTransaction(il);
         }
 
-        /// <summary>
-        /// Creates a table in the DB
-        /// CAUTION: drops existing table!
-        /// </summary>
-        /// <param name="entity"></param>
-        /// <returns></returns>
-        public virtual bool CreateEntity(string entity, bool dropifexists = false)
-        {
-            using (var command = _conn.CreateCommand())
-            {
-                if (!dropifexists && ExistEntity(entity)) return true;
-                command.CommandText = string.Format(DDL, entity);
-                return command.ExecuteNonQuery() > 0;
-            }
-        }
-
-        /// <summary>
-        /// Check whether an entity is present
-        /// </summary>
-        /// <param name="entity"></param>
-        /// <returns></returns>
-        public virtual bool ExistEntity(string entity)
-        {
-            using (var command = _conn.CreateCommand() as DbCommand)
-            {
-                command.CommandText = EXIST_TABLE;
-                command.Parameters.Add(command.CreateParameter());
-                command.Parameters[0].Value = entity;
-
-                var result = command.ExecuteScalar();
-                if (result==null) return false;
-                return result.ToString().ToUpper()==entity.ToUpper();
-            }
-        }
 
         /// <summary>
         /// Quickly check whether a particular version exists
         /// </summary>
-        /// <param name="entity"></param>
+        /// <param name="catalogue"></param>
         /// <param name="ID"></param>
         /// <param name="version"></param>
         /// <returns></returns>
-        public virtual bool Exist(string entity, string ID, DateTime version)
+        public virtual bool Exist(string catalogue, string ID, DateTime version)
         {
 
             //returns last version date of the object or min_date
             using (var command = _conn.CreateCommand() as DbCommand)
             {
-                command.CommandText = string.Format(EXIST_VERSION, entity);
+                command.CommandText = string.Format(EXIST_VERSION, catalogue);
                 command.Parameters.Add(command.CreateParameter());
                 command.Parameters.Add(command.CreateParameter());
                 command.Parameters[0].Value = ID;
@@ -136,14 +123,14 @@ namespace SharpQuant.ObjectStore
         /// <summary>
         /// Just query the date of the lates verions
         /// </summary>
-        /// <param name="entity"></param>
+        /// <param name="catalogue"></param>
         /// <param name="ID"></param>
         /// <returns></returns>
-        public virtual DateTime LastVersion(string entity, string ID)
+        public virtual DateTime LastVersion(string catalogue, string ID)
         {
             using (var command = _conn.CreateCommand() as DbCommand)
             {
-                command.CommandText = string.Format(EXIST_LAST, entity);
+                command.CommandText = string.Format(EXIST_LAST, catalogue);
                 command.Parameters.Add(command.CreateParameter());
                 command.Parameters[0].Value = ID;
 
@@ -156,15 +143,15 @@ namespace SharpQuant.ObjectStore
         /// Get the time stamp of the version before or equal 'version'
         /// </summary>
         /// <typeparam name="T"></typeparam>
-        /// <param name="entity"></param>
+        /// <param name="catalogue"></param>
         /// <param name="ID"></param>
         /// <param name="version"></param>
         /// <returns></returns>
-        public virtual DateTime LastVersion(string entity, string ID, DateTime version)
+        public virtual DateTime LastVersion(string catalogue, string ID, DateTime version)
         {
             using (var command = _conn.CreateCommand() as DbCommand)
             {
-                command.CommandText = string.Format(EXIST_VERSION2, entity);
+                command.CommandText = string.Format(EXIST_VERSION2, catalogue);
                 command.Parameters.Add(command.CreateParameter());
                 command.Parameters.Add(command.CreateParameter());
                 command.Parameters[0].Value = ID;
@@ -175,18 +162,18 @@ namespace SharpQuant.ObjectStore
         }
 
         /// <summary>
-        /// Get all infos from an entity
+        /// Get all infos from an catalogue
         /// Object instancies will not be deserialized
         /// </summary>
-        /// <param name="entity"></param>
+        /// <param name="catalogue"></param>
         /// <returns></returns>
-        public virtual IList<IObjectInfo<object>> GetAllInfos(string entity)
+        public virtual IList<IObjectInfo<object>> GetAllInfos(string catalogue)
         {
             var list = new List<IObjectInfo<object>>();
 
             using (var command = _conn.CreateCommand() as DbCommand)
             {
-                command.CommandText = string.Format(READ_ALL_INFO_ENTITY, entity);
+                command.CommandText = string.Format(READ_ALL_INFO_ENTITY, catalogue);
 
                 using (var reader = command.ExecuteReader())
                 {
@@ -196,7 +183,7 @@ namespace SharpQuant.ObjectStore
                         {
                             ID = (string)reader[1],
                             Version = (DateTime)reader[0],
-                            Tags = _infoSerializer.Deserialize((string)reader[2])
+                            Tags = _tagsSerializer.Deserialize((string)reader[2])
                         };
                         list.Add(info);
                     }
@@ -209,16 +196,16 @@ namespace SharpQuant.ObjectStore
         /// Get all infos(versions) for an ID
         /// Object instancies will not be deserialized
         /// </summary>
-        /// <param name="entity"></param>
+        /// <param name="catalogue"></param>
         /// <param name="ID"></param>
         /// <returns></returns>
-        public virtual IList<IObjectInfo<object>> GetAllInfos(string entity, string ID)
+        public virtual IList<IObjectInfo<object>> GetAllInfos(string catalogue, string ID)
         {
             var list = new List<IObjectInfo<object>>();
 
             using (var command = _conn.CreateCommand() as DbCommand)
             {
-                command.CommandText = string.Format(READ_ALL_INFO_CODES, entity);
+                command.CommandText = string.Format(READ_ALL_INFO_CODES, catalogue);
                 command.Parameters.Add(command.CreateParameter());
                 command.Parameters[0].Value = ID;
 
@@ -230,7 +217,7 @@ namespace SharpQuant.ObjectStore
                         {
                             ID = (string)reader[1],
                             Version = (DateTime)reader[0],
-                            Tags = _infoSerializer.Deserialize((string)reader[2])
+                            Tags = _tagsSerializer.Deserialize((string)reader[2])
                         };
                         list.Add(info);
                     }
@@ -238,6 +225,139 @@ namespace SharpQuant.ObjectStore
                 return list;
             }
         }
+
+        #region CRUD catalogues
+
+        /// <summary>
+        /// Check whether an catalogue is present
+        /// </summary>
+        /// <param name="code"></param>
+        /// <returns></returns>
+        public virtual ICatalogue GetCatalogue(string code)
+        {
+            using (var command = _conn.CreateCommand() as DbCommand)
+            {
+                command.CommandText = READ_CATALOGUE;
+                command.Parameters.Add(command.CreateParameter());
+                command.Parameters[0].Value = code;
+     
+                using (var reader = command.ExecuteReader())
+                {
+                    if (reader.Read())
+                    {
+                        return new Catalogue()
+                        {
+                            ID = (int)reader[0],
+                            CODE = (string)reader[1],
+                            Name = (string)reader[2],
+                            Description = (string)reader[3],
+                            Tags = _tagsSerializer.Deserialize((string)reader[4]),
+                        };
+                    }
+                }
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Creates a table in the DB
+        /// CAUTION: drops existing table!
+        /// </summary>
+        /// <param name="catalogue"></param>
+        /// <returns></returns>
+        public virtual bool CreateCatalogue(Catalogue catalogue, bool dropifexists = false)
+        {
+
+            bool exists = GetCatalogue(catalogue.CODE) != null;
+            if (!dropifexists && exists) return true;
+            if (dropifexists && exists) DeleteCatalogue(catalogue.CODE);
+
+            using (var command = _conn.CreateCommand() as DbCommand)
+            {
+                command.CommandText = INSERT_CATALOGUE;
+                command.Parameters.Add(command.CreateParameter());
+                command.Parameters.Add(command.CreateParameter());
+                command.Parameters.Add(command.CreateParameter());
+                command.Parameters.Add(command.CreateParameter());
+                command.Parameters[0].Value = catalogue.CODE;
+                command.Parameters[1].Value = catalogue.Name;
+                command.Parameters[2].Value = catalogue.Description;
+                command.Parameters[3].Value = _tagsSerializer.Serialize(catalogue.Tags);
+                command.ExecuteNonQuery();
+                //Remark: we ignore the autoincrement value
+                // SELECT last_insert_rowid()
+                //would retrieve the autoincrement ID for sqlite; if needed just re-read the catalogue
+            }
+            using (var command = _conn.CreateCommand())
+            {
+                command.CommandText = string.Format(DDL, catalogue.CODE);
+                command.ExecuteNonQuery();
+            }
+            return true;
+        }
+
+        public virtual bool DeleteCatalogue(string code)
+        {
+            using (var command = _conn.CreateCommand() as DbCommand)
+            {
+                command.CommandText = DELETE_CATALOGUE;
+                command.Parameters.Add(command.CreateParameter());
+                command.Parameters[0].Value = code;
+                command.ExecuteNonQuery();
+            }
+            using (var command = _conn.CreateCommand() as DbCommand)
+            {
+                command.CommandText = string.Format(DROP_CATALOGUE,code);
+                command.ExecuteNonQuery();
+            }
+            return true;
+        }
+
+        public virtual bool UpdateCatalogue(Catalogue catalogue)
+        {
+            using (var command = _conn.CreateCommand() as DbCommand)
+            {
+                command.CommandText = UPDATE_CATALOGUE;
+                command.Parameters.Add(command.CreateParameter());
+                command.Parameters.Add(command.CreateParameter());
+                command.Parameters.Add(command.CreateParameter());
+                command.Parameters.Add(command.CreateParameter());
+                command.Parameters[0].Value = catalogue.Name;
+                command.Parameters[1].Value = catalogue.Description;
+                command.Parameters[2].Value = _tagsSerializer.Serialize(catalogue.Tags);
+                command.Parameters[3].Value = catalogue.CODE;
+                return command.ExecuteNonQuery() > 0;
+            }
+        }
+
+        public virtual IList<ICatalogue> GetCatalogues()
+        {
+            var list = new List<ICatalogue>();
+
+            using (var command = _conn.CreateCommand() as DbCommand)
+            {
+                command.CommandText = READ_CATALOGUES;
+
+                using (var reader = command.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        var cat = new Catalogue()
+                        {
+                            ID = (int)reader[0],
+                            CODE = (string)reader[1],
+                            Name = (string)reader[2],
+                            Description = (string)reader[3],
+                            Tags = _tagsSerializer.Deserialize((string)reader[4]),
+                        };
+                        list.Add(cat);
+                    }
+                }
+                return list;
+            }
+        }
+
+        #endregion
 
         #region CRUD
 
@@ -248,9 +368,9 @@ namespace SharpQuant.ObjectStore
         /// </summary>
         /// <typeparam name="T"></typeparam>
         /// <param name="info"></param>
-        /// <param name="updateInfo">overwrite the info or leave what is currently in the field when updating</param>
+        /// <param name="updateTags">overwrite the info or leave what is currently in the field when updating</param>
         /// <returns></returns>
-        public virtual bool CreateOrUpdate<T>(IObjectInfo<T> info, bool updateInfo = true)
+        public virtual bool CreateOrUpdate<T>(IObjectInfo<T> info, bool updateTags = true)
         {
 
             DateTime version = Exist(info.Entity, info.ID, info.Version) ? info.Version : DateTime.MinValue;
@@ -264,11 +384,11 @@ namespace SharpQuant.ObjectStore
                 if (update)
                 {
                     int i = 0;
-                    if (updateInfo)
+                    if (updateTags)
                     {
                         command.CommandText = string.Format(UPDATE_VERSION, info.Entity);
                         command.Parameters.Add(command.CreateParameter());
-                        command.Parameters[0].Value = _infoSerializer.Serialize(info.Tags);
+                        command.Parameters[0].Value = _tagsSerializer.Serialize(info.Tags);
                         i = 1;
                     }
                     else
@@ -296,7 +416,7 @@ namespace SharpQuant.ObjectStore
 
                     command.Parameters[0].Value = version;
                     command.Parameters[1].Value = info.ID;
-                    command.Parameters[2].Value = _infoSerializer.Serialize(info.Tags);
+                    command.Parameters[2].Value = _tagsSerializer.Serialize(info.Tags);
                     command.Parameters[3].Value = _serializer.Serialize<T>(info.Instance);
                 }
 
@@ -311,19 +431,19 @@ namespace SharpQuant.ObjectStore
         /// Gets a particular version of the object
         /// </summary>
         /// <typeparam name="T"></typeparam>
-        /// <param name="entity"></param>
+        /// <param name="catalogue"></param>
         /// <param name="ID"></param>
         /// <param name="version"></param>
         /// <param name="info"></param>
         /// <returns></returns>
-        public virtual IObjectInfo<T> GetObject<T>(string entity, string ID, DateTime version)
+        public virtual IObjectInfo<T> GetObject<T>(string catalogue, string ID, DateTime version)
         {
             var info = new ObjectInfo<T>();
-            info.Entity = entity;
+            info.Entity = catalogue;
 
             using (var command = _conn.CreateCommand() as DbCommand)
             {
-                command.CommandText = string.Format(READ_VERSION, entity);
+                command.CommandText = string.Format(READ_VERSION, catalogue);
                 command.Parameters.Add(command.CreateParameter());
                 command.Parameters.Add(command.CreateParameter());
                 command.Parameters[0].Value = ID;
@@ -335,7 +455,7 @@ namespace SharpQuant.ObjectStore
                     {
                         info.Version = (DateTime)reader[0];
                         info.ID = (string)reader[1];
-                        info.Tags = _infoSerializer.Deserialize((string)reader[2]);
+                        info.Tags = _tagsSerializer.Deserialize((string)reader[2]);
                         info.Instance = _serializer.Deserialize<T>((byte[])reader[3]);
                     }
                 }
@@ -350,11 +470,11 @@ namespace SharpQuant.ObjectStore
         /// <param name="ID"></param>
         /// <param name="info"></param>
         /// <returns></returns>
-        public virtual IObjectInfo<T> GetObject<T>(string entity, string ID)
+        public virtual IObjectInfo<T> GetObject<T>(string catalogue, string ID)
         {
-            DateTime latest = LastVersion(entity, ID);
+            DateTime latest = LastVersion(catalogue, ID);
             if (latest > DateTime.MinValue)
-                return GetObject<T>(entity, ID, latest);
+                return GetObject<T>(catalogue, ID, latest);
 
             return null;
         }
@@ -362,14 +482,14 @@ namespace SharpQuant.ObjectStore
         /// <summary>
         /// Delete all the versions of a particular object
         /// </summary>
-        /// <param name="entity"></param>
+        /// <param name="catalogue"></param>
         /// <param name="ID"></param>
         /// <returns></returns>
-        public int DeleteObject(string entity, string ID)
+        public int DeleteObject(string catalogue, string ID)
         {
             using (var command = _conn.CreateCommand() as DbCommand)
             {
-                command.CommandText = string.Format(DELETE_ALL_VERSIONS, entity);
+                command.CommandText = string.Format(DELETE_ALL_VERSIONS, catalogue);
                 command.Parameters.Add(command.CreateParameter());
                 command.Parameters[0].Value = ID;
 
@@ -381,15 +501,15 @@ namespace SharpQuant.ObjectStore
         /// <summary>
         /// Delete a specific version of the object
         /// </summary>
-        /// <param name="entity"></param>
+        /// <param name="catalogue"></param>
         /// <param name="ID"></param>
         /// <param name="version"></param>
         /// <returns></returns>
-        public virtual int DeleteObject(string entity, string ID, DateTime version)
+        public virtual int DeleteObject(string catalogue, string ID, DateTime version)
         {
             using (var command = _conn.CreateCommand()as DbCommand)
             {
-                command.CommandText = string.Format(DELETE_VERSION, entity);
+                command.CommandText = string.Format(DELETE_VERSION, catalogue);
                 command.Parameters.Add(command.CreateParameter());
                 command.Parameters.Add(command.CreateParameter());
                 command.Parameters[0].Value = ID;

@@ -5,7 +5,7 @@ using System.Text;
 
 namespace SharpQuant.ObjectStore
 {
-    public interface IInfoSerializer
+    public interface ITagsSerializer
     {
         IDictionary<string, string> Deserialize(string raw);
         string Serialize(IDictionary<string, string> info);
@@ -14,7 +14,7 @@ namespace SharpQuant.ObjectStore
     /// <summary>
     /// Simplistic but fast INI-like serializer. No special characters allowed.
     /// </summary>
-    public class INIInfoSerializer : IInfoSerializer
+    public class INITagsSerializer : ITagsSerializer
     {
         private string _valueSeparator = "]=[";
         private char _itemSeparator = '\n';
@@ -35,7 +35,7 @@ namespace SharpQuant.ObjectStore
 
                 dict.Add(key, value);
             }
-            
+
             return dict;
         }
 
@@ -59,13 +59,13 @@ namespace SharpQuant.ObjectStore
     /// <summary>
     /// Simplistic but fast JSON-like serializer. No special characters allowed.
     /// </summary>
-    public class JSONInfoSerializer : IInfoSerializer
+    public class JSONTagsSerializer : ITagsSerializer
     {
         public IDictionary<string, string> Deserialize(string raw)
         {
             var dict = new Dictionary<string, string>();
-            
-            if (string.IsNullOrEmpty(raw)) 
+
+            if (string.IsNullOrEmpty(raw))
                 return dict;
 
             var lines = raw.Split(',');
