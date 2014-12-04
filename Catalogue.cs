@@ -7,7 +7,6 @@ namespace SharpQuant.ObjectStore
 {
     public class Catalogue : ICatalogue
     {
-        public int ID { get; set; }
         public string CODE { get; set; }
         public string Name { get; set; }
         public string Description { get; set; }
@@ -16,7 +15,6 @@ namespace SharpQuant.ObjectStore
 
     public interface ICatalogue
     {
-        int ID { get; set; }
         string CODE { get; set; }
         string Name { get; set; }
         string Description { get; set; }

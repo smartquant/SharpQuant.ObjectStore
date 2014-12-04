@@ -36,8 +36,8 @@ namespace SharpQuant.ObjectStore
             CREATE UNIQUE INDEX [idxCatalogue] on [tblCatalogue] (CODE ASC);
             ";
 
-        protected static string READ_CATALOGUES = "SELECT ID,CODE,Name,Description,Info FROM tblCatalogue";
-        protected static string READ_CATALOGUE = "SELECT ID,CODE,Name,Description,Info FROM tblCatalogue WHERE CODE=?";
+        protected static string READ_CATALOGUES = "SELECT CODE,Name,Description,Info FROM tblCatalogue";
+        protected static string READ_CATALOGUE = "SELECT CODE,Name,Description,Info FROM tblCatalogue WHERE CODE=?";
         protected static string INSERT_CATALOGUE = "INSERT INTO tblCatalogue(CODE,Name,Description,Info) VALUES(?,?,?,?)";
         protected static string UPDATE_CATALOGUE = "UPDATE tblCatalogue SET(Name=?,Description=?,Info=?) WHERE CODE=?";
         protected static string DELETE_CATALOGUE = "DELETE FROM tblCatalogue WHERE CODE=?";
@@ -247,11 +247,10 @@ namespace SharpQuant.ObjectStore
                     {
                         return new Catalogue()
                         {
-                            ID = (int)reader[0],
-                            CODE = (string)reader[1],
-                            Name = (string)reader[2],
-                            Description = (string)reader[3],
-                            Tags = _tagsSerializer.Deserialize((string)reader[4]),
+                            CODE = (string)reader[0],
+                            Name = (string)reader[1],
+                            Description = (string)reader[2],
+                            Tags = _tagsSerializer.Deserialize((string)reader[3]),
                         };
                     }
                 }
@@ -344,11 +343,10 @@ namespace SharpQuant.ObjectStore
                     {
                         var cat = new Catalogue()
                         {
-                            ID = (int)reader[0],
-                            CODE = (string)reader[1],
-                            Name = (string)reader[2],
-                            Description = (string)reader[3],
-                            Tags = _tagsSerializer.Deserialize((string)reader[4]),
+                            CODE = (string)reader[0],
+                            Name = (string)reader[1],
+                            Description = (string)reader[2],
+                            Tags = _tagsSerializer.Deserialize((string)reader[3]),
                         };
                         list.Add(cat);
                     }
