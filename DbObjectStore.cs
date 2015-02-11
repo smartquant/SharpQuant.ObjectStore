@@ -39,7 +39,7 @@ namespace SharpQuant.ObjectStore
         protected static string READ_CATALOGUES = "SELECT CODE,Name,Description,Info FROM tblCatalogue";
         protected static string READ_CATALOGUE = "SELECT CODE,Name,Description,Info FROM tblCatalogue WHERE CODE=?";
         protected static string INSERT_CATALOGUE = "INSERT INTO tblCatalogue(CODE,Name,Description,Info) VALUES(?,?,?,?)";
-        protected static string UPDATE_CATALOGUE = "UPDATE tblCatalogue SET(Name=?,Description=?,Info=?) WHERE CODE=?";
+        protected static string UPDATE_CATALOGUE = "UPDATE tblCatalogue SET Name=?,Description=?,Info=? WHERE CODE=?";
         protected static string DELETE_CATALOGUE = "DELETE FROM tblCatalogue WHERE CODE=?";
         protected static string DROP_CATALOGUE = "DROP TABLE IF EXISTS [{0}]";
 
@@ -50,14 +50,19 @@ namespace SharpQuant.ObjectStore
                 ID          INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
                 Version     DateTime NOT NULL,
                 CODE        TEXT NOT NULL,
+                Type        TEXT,
                 Info        TEXT,
                 Data        BLOB
             );
             CREATE UNIQUE INDEX [idx{0}] on [{0}] (CODE ASC,Version ASC);
+            CREATE INDEX [idx{0}_Type] on [{0}](Type);
             ";
-        protected static string READ_VERSION = "SELECT version,code,info,data FROM {0} WHERE (CODE=? AND version=?) ORDER BY version";
-        protected static string READ_ALL_INFO_CODES = "SELECT version,code,info FROM {0} WHERE (CODE=?) ORDER BY version";
-        protected static string READ_ALL_INFO_ENTITY = "SELECT version,code,info FROM {0} ORDER BY version";
+        protected static string READ_VERSION = "SELECT version,code,type,info,data FROM {0} WHERE (CODE=? AND version=?) ORDER BY version";
+        protected static string READ_ALL_INFO_CODES = "SELECT version,code,type,info FROM {0} WHERE (CODE=?) ORDER BY version";
+        protected static string READ_ALL_INFO_CATALOGUE = "SELECT version,code,type,info FROM {0} WHERE (type like ?) ORDER BY code,version";
+
+        protected static string READ_ALL_CODES = "SELECT version,code,type,info,data FROM {0} WHERE (CODE=?) ORDER BY version";
+        protected static string READ_ALL_CATALOGUE = "SELECT version,code,type,info,data FROM {0} WHERE (type like ?) ORDER BY code,version";
 
         protected static string EXIST_VERSION = "SELECT max(version) FROM {0} WHERE (CODE=? AND version=?)";
         protected static string EXIST_VERSION2 = "SELECT max(version) FROM {0} WHERE (CODE=? AND version<=?)";
@@ -69,7 +74,7 @@ namespace SharpQuant.ObjectStore
         protected static string UPDATE_VERSION = "UPDATE {0} SET info=?,data=?  WHERE (CODE=? AND version=?)";
         protected static string UPDATE_VERSION_NOINFO = "UPDATE {0} SET data=?  WHERE (CODE=? AND version=?)";
 
-        protected static string INSERT = "INSERT INTO {0}(version,code,info,data) VALUES(?,?,?,?)";
+        protected static string INSERT = "INSERT INTO {0}(version,code,type,info,data) VALUES(?,?,?,?,?)";
 
         #endregion
 
@@ -86,6 +91,19 @@ namespace SharpQuant.ObjectStore
 
         #endregion
 
+        protected DateTime AdjustDateTime(DateTime raw)
+        {
+            //precision only up to milliseconds
+            //return raw.AddTicks(-(raw.Ticks % TimeSpan.TicksPerMillisecond));
+            //precision only up to seconds
+            return raw.AddTicks(-(raw.Ticks % TimeSpan.TicksPerSecond));
+        }
+
+
+        public IObjectSerializer Serializer
+        {
+            get { return _serializer; }
+        }
 
         public virtual IDbTransaction BeginTransaction(IsolationLevel il=IsolationLevel.Unspecified)
         {
@@ -155,7 +173,7 @@ namespace SharpQuant.ObjectStore
                 command.Parameters.Add(command.CreateParameter());
                 command.Parameters.Add(command.CreateParameter());
                 command.Parameters[0].Value = ID;
-                command.Parameters[1].Value = version;
+                command.Parameters[1].Value = AdjustDateTime(version);
                 object retval = command.ExecuteScalar();
                 return (retval.GetType() == typeof(System.DBNull)) ? DateTime.MinValue : DateTime.Parse(retval.ToString());
             }
@@ -167,23 +185,29 @@ namespace SharpQuant.ObjectStore
         /// </summary>
         /// <param name="catalogue"></param>
         /// <returns></returns>
-        public virtual IList<IObjectInfo<object>> GetAllInfos(string catalogue)
+        public virtual IList<IObjectInfo> GetAllInfos(string catalogue, string type = "%", bool read_data = false)
         {
-            var list = new List<IObjectInfo<object>>();
+            var list = new List<IObjectInfo>();
 
             using (var command = _conn.CreateCommand() as DbCommand)
             {
-                command.CommandText = string.Format(READ_ALL_INFO_ENTITY, catalogue);
+                command.CommandText = read_data ? string.Format(READ_ALL_CATALOGUE, catalogue) :
+                    string.Format(READ_ALL_INFO_CATALOGUE, catalogue);
+                command.Parameters.Add(command.CreateParameter());
+                command.Parameters[0].Value = type;
 
                 using (var reader = command.ExecuteReader())
                 {
                     while (reader.Read())
                     {
-                        var info = new ObjectInfo<object>()
+                        var info = new ObjectInfo()
                         {
                             ID = (string)reader[1],
+                            Catalogue = catalogue,
                             Version = (DateTime)reader[0],
-                            Tags = _tagsSerializer.Deserialize((string)reader[2])
+                            Type = reader[2] as string,
+                            Tags = _tagsSerializer.Deserialize(reader[3] as string),
+                            Data = (read_data) ? reader[4] as byte[] : null,
                         };
                         list.Add(info);
                     }
@@ -199,13 +223,14 @@ namespace SharpQuant.ObjectStore
         /// <param name="catalogue"></param>
         /// <param name="ID"></param>
         /// <returns></returns>
-        public virtual IList<IObjectInfo<object>> GetAllInfos(string catalogue, string ID)
+        public virtual IList<IObjectInfo> GetAllInfosForID(string catalogue, string ID, bool read_data = false)
         {
-            var list = new List<IObjectInfo<object>>();
+            var list = new List<IObjectInfo>();
 
             using (var command = _conn.CreateCommand() as DbCommand)
             {
-                command.CommandText = string.Format(READ_ALL_INFO_CODES, catalogue);
+                command.CommandText = read_data ? string.Format(READ_ALL_CODES, catalogue):
+                    string.Format(READ_ALL_INFO_CODES, catalogue);
                 command.Parameters.Add(command.CreateParameter());
                 command.Parameters[0].Value = ID;
 
@@ -213,11 +238,14 @@ namespace SharpQuant.ObjectStore
                 {
                     while (reader.Read())
                     {
-                        var info = new ObjectInfo<object>()
+                        var info = new ObjectInfo()
                         {
                             ID = (string)reader[1],
                             Version = (DateTime)reader[0],
-                            Tags = _tagsSerializer.Deserialize((string)reader[2])
+                            Catalogue = catalogue,
+                            Type = reader[2] as string,
+                            Tags = _tagsSerializer.Deserialize(reader[3] as string),
+                            Data = (read_data) ? reader[4] as byte[] : null,
                         };
                         list.Add(info);
                     }
@@ -247,10 +275,10 @@ namespace SharpQuant.ObjectStore
                     {
                         return new Catalogue()
                         {
-                            CODE = (string)reader[0],
-                            Name = (string)reader[1],
-                            Description = (string)reader[2],
-                            Tags = _tagsSerializer.Deserialize((string)reader[3]),
+                            CODE = reader[0] as string,
+                            Name = reader[1] as string,
+                            Description = reader[2] as string,
+                            Tags = _tagsSerializer.Deserialize(reader[3] as string),
                         };
                     }
                 }
@@ -264,7 +292,7 @@ namespace SharpQuant.ObjectStore
         /// </summary>
         /// <param name="catalogue"></param>
         /// <returns></returns>
-        public virtual bool CreateCatalogue(Catalogue catalogue, bool dropifexists = false)
+        public virtual bool CreateCatalogue(ICatalogue catalogue, bool dropifexists = false)
         {
 
             bool exists = GetCatalogue(catalogue.CODE) != null;
@@ -312,7 +340,7 @@ namespace SharpQuant.ObjectStore
             return true;
         }
 
-        public virtual bool UpdateCatalogue(Catalogue catalogue)
+        public virtual bool UpdateCatalogue(ICatalogue catalogue)
         {
             using (var command = _conn.CreateCommand() as DbCommand)
             {
@@ -343,10 +371,10 @@ namespace SharpQuant.ObjectStore
                     {
                         var cat = new Catalogue()
                         {
-                            CODE = (string)reader[0],
-                            Name = (string)reader[1],
-                            Description = (string)reader[2],
-                            Tags = _tagsSerializer.Deserialize((string)reader[3]),
+                            CODE = reader[0] as string,
+                            Name = reader[1] as string,
+                            Description = reader[2] as string,
+                            Tags = _tagsSerializer.Deserialize(reader[3] as string),
                         };
                         list.Add(cat);
                     }
@@ -370,8 +398,21 @@ namespace SharpQuant.ObjectStore
         /// <returns></returns>
         public virtual bool CreateOrUpdate<T>(IObjectInfo<T> info, bool updateTags = true)
         {
+            return CreateOrUpdate(info.ToObjectInfo<T>(_serializer));
+        }
 
-            DateTime version = Exist(info.Entity, info.ID, info.Version) ? info.Version : DateTime.MinValue;
+        /// <summary>
+        /// Creates an instance if no instance is found with the time stamp given in info.Version
+        /// Updates an instance if info.Version matches what is in the DB
+        /// Updates the last instance if info.Version is not initialized (DateTime.MinValue) 
+        /// </summary>
+        /// <param name="info"></param>
+        /// <param name="updateTags"></param>
+        /// <returns></returns>
+        public virtual bool CreateOrUpdate(IObjectInfo info, bool updateTags = true)
+        {
+
+            DateTime version = Exist(info.Catalogue, info.ID, info.Version) ? AdjustDateTime(info.Version) : DateTime.MinValue;
             bool update = false;
 
             if (info.Version == DateTime.MinValue && version > DateTime.MinValue) update = true;
@@ -384,38 +425,38 @@ namespace SharpQuant.ObjectStore
                     int i = 0;
                     if (updateTags)
                     {
-                        command.CommandText = string.Format(UPDATE_VERSION, info.Entity);
+                        command.CommandText = string.Format(UPDATE_VERSION, info.Catalogue);
                         command.Parameters.Add(command.CreateParameter());
                         command.Parameters[0].Value = _tagsSerializer.Serialize(info.Tags);
                         i = 1;
                     }
                     else
                     {
-                        command.CommandText = string.Format(UPDATE_VERSION_NOINFO, info.Entity);
+                        command.CommandText = string.Format(UPDATE_VERSION_NOINFO, info.Catalogue);
                     }
 
                     command.Parameters.Add(command.CreateParameter());
                     command.Parameters.Add(command.CreateParameter());
                     command.Parameters.Add(command.CreateParameter());
-                    command.Parameters[i++].Value = _serializer.Serialize<T>(info.Instance);
+                    command.Parameters[i++].Value = info.Data;
                     command.Parameters[i++].Value = info.ID;
                     command.Parameters[i++].Value = version;
 
                 }
                 else
                 {
-                    version = (info.Version > DateTime.MinValue) ?
-                        info.Version.Date + new TimeSpan(info.Version.Hour, info.Version.Minute, info.Version.Second) :
-                        info.Version;
-                    command.CommandText = string.Format(INSERT, info.Entity);
+                    version = AdjustDateTime(info.Version);
 
-                    for (int i = 0; i < 4; i++)
+                    command.CommandText = string.Format(INSERT, info.Catalogue);
+
+                    for (int i = 0; i < 5; i++)
                         command.Parameters.Add(command.CreateParameter());
 
                     command.Parameters[0].Value = version;
                     command.Parameters[1].Value = info.ID;
-                    command.Parameters[2].Value = _tagsSerializer.Serialize(info.Tags);
-                    command.Parameters[3].Value = _serializer.Serialize<T>(info.Instance);
+                    command.Parameters[2].Value = info.Type;
+                    command.Parameters[3].Value = _tagsSerializer.Serialize(info.Tags);
+                    command.Parameters[4].Value = info.Data;
                 }
 
                 int res = command.ExecuteNonQuery();
@@ -436,29 +477,7 @@ namespace SharpQuant.ObjectStore
         /// <returns></returns>
         public virtual IObjectInfo<T> GetObject<T>(string catalogue, string ID, DateTime version)
         {
-            var info = new ObjectInfo<T>();
-            info.Entity = catalogue;
-
-            using (var command = _conn.CreateCommand() as DbCommand)
-            {
-                command.CommandText = string.Format(READ_VERSION, catalogue);
-                command.Parameters.Add(command.CreateParameter());
-                command.Parameters.Add(command.CreateParameter());
-                command.Parameters[0].Value = ID;
-                command.Parameters[1].Value = version;
-
-                using (var reader = command.ExecuteReader())
-                {
-                    if (reader.Read())
-                    {
-                        info.Version = (DateTime)reader[0];
-                        info.ID = (string)reader[1];
-                        info.Tags = _tagsSerializer.Deserialize((string)reader[2]);
-                        info.Instance = _serializer.Deserialize<T>((byte[])reader[3]);
-                    }
-                }
-                return info;
-            }
+            return GetObjectInfo(catalogue, ID, version).ToObjectInfoT<T>(_serializer);
         }
 
         /// <summary>
@@ -475,6 +494,43 @@ namespace SharpQuant.ObjectStore
                 return GetObject<T>(catalogue, ID, latest);
 
             return null;
+        }
+
+        public virtual IObjectInfo GetObjectInfo(string catalogue, string ID)
+        {
+            DateTime latest = LastVersion(catalogue, ID);
+            if (latest > DateTime.MinValue)
+                return GetObjectInfo(catalogue, ID, latest);
+
+            return null;
+        }
+
+        public virtual IObjectInfo GetObjectInfo(string catalogue, string ID, DateTime version)
+        {
+            var info = new ObjectInfo();
+            info.Catalogue = catalogue;
+
+            using (var command = _conn.CreateCommand() as DbCommand)
+            {
+                command.CommandText = string.Format(READ_VERSION, catalogue);
+                command.Parameters.Add(command.CreateParameter());
+                command.Parameters.Add(command.CreateParameter());
+                command.Parameters[0].Value = ID;
+                command.Parameters[1].Value = version;
+
+                using (var reader = command.ExecuteReader())
+                {
+                    if (reader.Read())
+                    {
+                        info.Version = (DateTime)reader[0];
+                        info.ID = (string)reader[1];
+                        info.Type = reader[2] as string;
+                        info.Tags = _tagsSerializer.Deserialize(reader[3] as string);
+                        info.Data = reader[4] as byte[];
+                    }
+                }
+                return info;
+            }
         }
 
         /// <summary>
@@ -544,7 +600,6 @@ namespace SharpQuant.ObjectStore
             GC.SuppressFinalize(this);
         }
         #endregion
-
 
     }
 }

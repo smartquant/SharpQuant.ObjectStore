@@ -5,6 +5,10 @@ using System.Text;
 
 namespace SharpQuant.ObjectStore
 {
+    /// <summary>
+    /// REMARK: The reason we want to serialize tags into text is that they can be read in a
+    /// DB field with another API as opposed to the binary object data
+    /// </summary>
     public interface ITagsSerializer
     {
         IDictionary<string, string> Deserialize(string raw);

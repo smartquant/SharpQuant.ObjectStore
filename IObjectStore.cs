@@ -4,24 +4,27 @@ using System.Data;
 
 namespace SharpQuant.ObjectStore
 {
-    interface IObjectStore
+    public interface IObjectStore
     {
+        //Access to the serializer
+        IObjectSerializer Serializer { get; }
+
 		// Gets a single catalogue
         ICatalogue GetCatalogue(string code);
 
         // Creates a new catalogue (think table in a DB)
-        bool CreateCatalogue(Catalogue catalogue, bool dropifexists = false);
+        bool CreateCatalogue(ICatalogue catalogue, bool dropifexists = false);
         // Careful! Deletes entire catalogue! 
         bool DeleteCatalogue(string code);
         // Updates catalogue information
-        bool UpdateCatalogue(Catalogue catalogue);
+        bool UpdateCatalogue(ICatalogue catalogue);
         //gets all the catalogues
         IList<ICatalogue> GetCatalogues();
 
 		
-        // Deletes a specific versions of an object! Returns how many records where deleted.
+        // Deletes all versions of an object! Returns how many records where deleted.
         int DeleteObject(string catalogue, string ID);
-        // Deletes a specific versions of an object! Returns how many records where deleted.
+        // Deletes a specific version of an object! Returns how many records where deleted.
         int DeleteObject(string catalogue, string ID, DateTime version);
 
         //check whether a particular version exists
@@ -34,15 +37,21 @@ namespace SharpQuant.ObjectStore
         //Create or update a serialized object
         //tags will be overwritten if updateinfo = true
         bool CreateOrUpdate<T>(IObjectInfo<T> info, bool updateInfo = true);
+        bool CreateOrUpdate(IObjectInfo info, bool updateInfo = true);
         //get last version
         IObjectInfo<T> GetObject<T>(string catalogue, string ID);
         //get last version before 'version'
         IObjectInfo<T> GetObject<T>(string catalogue, string ID, DateTime version);
 
+        //get last version
+        IObjectInfo GetObjectInfo(string catalogue, string ID);
+        //get last version before 'version'
+        IObjectInfo GetObjectInfo(string catalogue, string ID, DateTime version);
+
         //Gets all infos without deserializing the objects of the entire catalogue
-        IList<IObjectInfo<object>> GetAllInfos(string catalogue);
+        IList<IObjectInfo> GetAllInfos(string catalogue, string type = "%", bool read_data = false);
         //Gets all infos without deserializing the objects for an ID
-        IList<IObjectInfo<object>> GetAllInfos(string catalogue, string ID);
+        IList<IObjectInfo> GetAllInfosForID(string catalogue, string ID, bool read_data = false);
 
         //Transaction support
         IDbTransaction BeginTransaction(IsolationLevel il = IsolationLevel.Unspecified);
