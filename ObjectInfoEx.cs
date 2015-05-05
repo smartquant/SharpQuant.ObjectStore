@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
 
@@ -17,15 +18,17 @@ namespace SharpQuant.ObjectStore
         /// <returns></returns>
         public static IObjectInfo<T> ToObjectInfoT<T>(this IObjectInfo info, IObjectSerializer serializer)
         {
-            return new ObjectInfo<T>()
+            var obj = new ObjectInfo<T>()
             {
                 Catalogue = info.Catalogue,
                 ID = info.ID,
                 Type = info.Type,
                 Tags = info.Tags,
                 Version = info.Version,
-                Instance = serializer.Deserialize<T>(info.Data),
             };
+            using (var stream = new MemoryStream(info.Data, 0, info.DataSize))
+                obj.Instance = serializer.Deserialize<T>(stream);
+            return obj;
         }
         /// <summary>
         /// Convert type T ObjectInfo to DTO
@@ -36,15 +39,21 @@ namespace SharpQuant.ObjectStore
         /// <returns></returns>
         public static IObjectInfo ToObjectInfo<T>(this IObjectInfo<T> info, IObjectSerializer serializer)
         {
-            return new ObjectInfo()
+            var obj = new ObjectInfo()
             {
                 Catalogue = info.Catalogue,
                 ID = info.ID,
                 Type = info.Type,
                 Tags = info.Tags,
                 Version = info.Version,
-                Data = serializer.Serialize<T>(info.Instance),
             };
+            using (var stream = new MemoryStream())
+            {
+                serializer.Serialize<T>(stream, info.Instance);
+                obj.Data = stream.ToArray();
+                obj.DataSize = obj.Data.Length;
+            }
+            return obj;
         }
     }
 }

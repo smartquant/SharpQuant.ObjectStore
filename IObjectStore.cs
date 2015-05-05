@@ -4,6 +4,8 @@ using System.Data;
 
 namespace SharpQuant.ObjectStore
 {
+
+
     public interface IObjectStore
     {
         //Access to the serializer

@@ -1,13 +1,12 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
+using System.IO;
+
 
 namespace SharpQuant.ObjectStore
 {
     public interface IObjectSerializer
     {
-        T Deserialize<T>(byte[] data);
-        byte[] Serialize<T>(T obj);
+        T Deserialize<T>(Stream stream);
+        void Serialize<T>(Stream stream, T obj);
     }
 }

@@ -13,50 +13,58 @@ Design principles:
 
 
 ```csharp
-    interface IObjectStore
-    {
-		// Gets a single catalogue
-        ICatalogue GetCatalogue(string code);
+public interface IObjectStore
+{
+	//Access to the serializer
+	IObjectSerializer Serializer { get; }
 
-        // Creates a new catalogue (think table in a DB)
-        bool CreateCatalogue(Catalogue catalogue, bool dropifexists = false);
-        // Careful! Deletes entire catalogue! 
-        bool DeleteCatalogue(string code);
-        // Updates catalogue information
-        bool UpdateCatalogue(Catalogue catalogue);
-        //gets all the catalogues
-        IList<ICatalogue> GetCatalogues();
+	// Gets a single catalogue
+	ICatalogue GetCatalogue(string code);
 
-		
-        // Deletes a specific versions of an object! Returns how many records where deleted.
-        int DeleteObject(string catalogue, string ID);
-        // Deletes a specific versions of an object! Returns how many records where deleted.
-        int DeleteObject(string catalogue, string ID, DateTime version);
+	// Creates a new catalogue (think table in a DB)
+	bool CreateCatalogue(ICatalogue catalogue, bool dropifexists = false);
+	// Careful! Deletes entire catalogue! 
+	bool DeleteCatalogue(string code);
+	// Updates catalogue information
+	bool UpdateCatalogue(ICatalogue catalogue);
+	//gets all the catalogues
+	IList<ICatalogue> GetCatalogues();
 
-        //check whether a particular version exists
-        bool Exist(string catalogue, string DBID, DateTime version);
-        //last version of an ID
-        DateTime LastVersion(string catalogue, string ID);
-        //last version before 'version'
-        DateTime LastVersion(string catalogue, string ID, DateTime version);
+	
+	// Deletes all versions of an object! Returns how many records where deleted.
+	int DeleteObject(string catalogue, string ID);
+	// Deletes a specific version of an object! Returns how many records where deleted.
+	int DeleteObject(string catalogue, string ID, DateTime version);
 
-        //Create or update a serialized object
-        //tags will be overwritten if updateinfo = true
-        bool CreateOrUpdate<T>(IObjectInfo<T> info, bool updateInfo = true);
-        //get last version
-        IObjectInfo<T> GetObject<T>(string catalogue, string ID);
-        //get last version before 'version'
-        IObjectInfo<T> GetObject<T>(string catalogue, string ID, DateTime version);
+	//check whether a particular version exists
+	bool Exist(string catalogue, string DBID, DateTime version);
+	//last version of an ID
+	DateTime LastVersion(string catalogue, string ID);
+	//last version before 'version'
+	DateTime LastVersion(string catalogue, string ID, DateTime version);
 
-        //Gets all infos without deserializing the objects of the entire catalogue
-        IList<IObjectInfo<object>> GetAllInfos(string catalogue);
-        //Gets all infos without deserializing the objects for an ID
-        IList<IObjectInfo<object>> GetAllInfos(string catalogue, string ID);
+	//Create or update a serialized object
+	//tags will be overwritten if updateinfo = true
+	bool CreateOrUpdate<T>(IObjectInfo<T> info, bool updateInfo = true);
+	bool CreateOrUpdate(IObjectInfo info, bool updateInfo = true);
+	//get last version
+	IObjectInfo<T> GetObject<T>(string catalogue, string ID);
+	//get last version before 'version'
+	IObjectInfo<T> GetObject<T>(string catalogue, string ID, DateTime version);
 
-        //Transaction support
-        IDbTransaction BeginTransaction(IsolationLevel il = IsolationLevel.Unspecified);
+	//get last version
+	IObjectInfo GetObjectInfo(string catalogue, string ID);
+	//get last version before 'version'
+	IObjectInfo GetObjectInfo(string catalogue, string ID, DateTime version);
 
-    }
+	//Gets all infos without deserializing the objects of the entire catalogue
+	IList<IObjectInfo> GetAllInfos(string catalogue, string type = "%", bool read_data = false);
+	//Gets all infos without deserializing the objects for an ID
+	IList<IObjectInfo> GetAllInfosForID(string catalogue, string ID, bool read_data = false);
+
+	//Transaction support
+	IDbTransaction BeginTransaction(IsolationLevel il = IsolationLevel.Unspecified);
+}
 ```
 
 
@@ -65,15 +73,31 @@ The object can be retrieved or stored through the following structure.
 ```csharp
 public interface IObjectInfo<T>
 {
-	string Entity { get; }
+	string Catalogue { get; }
 	string ID { get; }
 	DateTime Version { get; }
-	IDictionary<string, string> Info { get; }
+	string Type { get; }
+	IDictionary<string, string> Tags { get; }
 
 	T Instance { get; }
 }
 ```
 
+But for process interaction it can be beneficial to use the DTO instead.
+
+```csharp
+public interface IObjectInfo
+{
+	string Catalogue { get; }
+	string ID { get; }
+	DateTime Version { get; }
+	string Type { get; }
+	IDictionary<string, string> Tags { get; }
+
+	byte[] Data { get; }
+	int DataSize { get; }
+}
+```
 
 The following interface defines how to serialize the tagging dictionary. Two simplistic serializers (JSON like and .INI like), but these work only for simple key-value pairs.
 
@@ -90,8 +114,8 @@ And this is the interface for the object serializer itself.
 ```csharp
 public interface IObjectSerializer
 {
-	T Deserialize<T>(byte[] data);
-	byte[] Serialize<T>(T obj);
+	T Deserialize<T>(Stream stream);
+	Stream Serialize<T>(T obj);
 }
 ```
 
@@ -105,20 +129,17 @@ namespace SharpQuant.ObjectStore.Serializers
 {
     public class ProtoObjectSerializer : IObjectSerializer
     {
-        public T Deserialize<T>(byte[] data)
+        public T Deserialize<T>(Stream stream)
         {
-            using (var stream = new MemoryStream(data))
-            {
-                return Serializer.Deserialize<T>(stream);
-            }           
+            return Serializer.Deserialize<T>(stream);        
         }
 
-        public byte[] Serialize<T>(T obj)
+        public Stream Serialize<T>(T obj)
         {
             using (var stream = new MemoryStream())
             {
                 Serializer.Serialize<T>(stream, obj);
-                return stream.ToArray();
+                return stream;
             }
         }
     }

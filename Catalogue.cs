@@ -18,6 +18,11 @@ namespace SharpQuant.ObjectStore
         [DataMember(Order = 4, Name = "Tags")]
         public IDictionary<string,string> Tags {get;set;}
 
+        public Catalogue()
+        {
+            Tags = new Dictionary<string, string>();
+        }
+
         public static Catalogue Create(ICatalogue catalogue)
         {
             return new Catalogue()

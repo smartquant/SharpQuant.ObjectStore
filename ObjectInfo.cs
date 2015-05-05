@@ -15,6 +15,7 @@ namespace SharpQuant.ObjectStore
         IDictionary<string, string> Tags { get; }
 
         byte[] Data { get; }
+        int DataSize { get; }
     }
 
     [DataContract, Serializable]
@@ -33,7 +34,13 @@ namespace SharpQuant.ObjectStore
         public IDictionary<string, string> Tags { get; set; }
         [DataMember(Order = 6, Name = "Data")]
         public byte[] Data { get; set; }
+        [DataMember(Order = 7, Name = "DataSize")]
+        public int DataSize { get; set; }
 
+        public ObjectInfo()
+        {
+            Tags = new Dictionary<string, string>();
+        }
 
         public static ObjectInfo Create(IObjectInfo info)
         {
@@ -45,6 +52,7 @@ namespace SharpQuant.ObjectStore
                 Type = info.Type,
                 Tags = new Dictionary<string, string>(info.Tags),
                 Data = info.Data,
+                DataSize = info.DataSize
             };
         }
 

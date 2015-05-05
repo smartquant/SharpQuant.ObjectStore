@@ -17,7 +17,7 @@ namespace SharpQuant.ObjectStore
         protected IDbConnection _conn;
         protected IObjectSerializer _serializer;
         protected ITagsSerializer _tagsSerializer;
-
+        
         #region SQL
 
         //SQLite SQL
@@ -52,16 +52,17 @@ namespace SharpQuant.ObjectStore
                 CODE        TEXT NOT NULL,
                 Type        TEXT,
                 Info        TEXT,
+                Size        INTEGER NOT NULL,
                 Data        BLOB
             );
             CREATE UNIQUE INDEX [idx{0}] on [{0}] (CODE ASC,Version ASC);
             CREATE INDEX [idx{0}_Type] on [{0}](Type);
             ";
-        protected static string READ_VERSION = "SELECT version,code,type,info,data FROM {0} WHERE (CODE=? AND version=?) ORDER BY version";
+        protected static string READ_VERSION = "SELECT version,code,type,info,size,data FROM {0} WHERE (CODE=? AND version=?)";
         protected static string READ_ALL_INFO_CODES = "SELECT version,code,type,info FROM {0} WHERE (CODE=?) ORDER BY version";
         protected static string READ_ALL_INFO_CATALOGUE = "SELECT version,code,type,info FROM {0} WHERE (type like ?) ORDER BY code,version";
 
-        protected static string READ_ALL_CODES = "SELECT version,code,type,info,data FROM {0} WHERE (CODE=?) ORDER BY version";
+        protected static string READ_ALL_CODES = "SELECT version,code,type,info,size,data FROM {0} WHERE (CODE=?) ORDER BY version";
         protected static string READ_ALL_CATALOGUE = "SELECT version,code,type,info,data FROM {0} WHERE (type like ?) ORDER BY code,version";
 
         protected static string EXIST_VERSION = "SELECT max(version) FROM {0} WHERE (CODE=? AND version=?)";
@@ -71,10 +72,10 @@ namespace SharpQuant.ObjectStore
         protected static string DELETE_ALL_VERSIONS = "DELETE FROM {0} WHERE CODE=?";
         protected static string DELETE_VERSION = "DELETE FROM {0} WHERE (CODE=? AND version=?)";
 
-        protected static string UPDATE_VERSION = "UPDATE {0} SET info=?,data=?  WHERE (CODE=? AND version=?)";
-        protected static string UPDATE_VERSION_NOINFO = "UPDATE {0} SET data=?  WHERE (CODE=? AND version=?)";
+        protected static string UPDATE_VERSION = "UPDATE {0} SET info=?,size=?,data=?  WHERE (CODE=? AND version=?)";
+        protected static string UPDATE_VERSION_NOINFO = "UPDATE {0} SET size=?,data=?  WHERE (CODE=? AND version=?)";
 
-        protected static string INSERT = "INSERT INTO {0}(version,code,type,info,data) VALUES(?,?,?,?,?)";
+        protected static string INSERT = "INSERT INTO {0}(version,code,type,info,size,data) VALUES(?,?,?,?,?,?)";
 
         #endregion
 
@@ -245,7 +246,8 @@ namespace SharpQuant.ObjectStore
                             Catalogue = catalogue,
                             Type = reader[2] as string,
                             Tags = _tagsSerializer.Deserialize(reader[3] as string),
-                            Data = (read_data) ? reader[4] as byte[] : null,
+                            DataSize = (int)reader[4],
+                            Data = (read_data) ? reader[5] as byte[] : null,
                         };
                         list.Add(info);
                     }
@@ -398,7 +400,7 @@ namespace SharpQuant.ObjectStore
         /// <returns></returns>
         public virtual bool CreateOrUpdate<T>(IObjectInfo<T> info, bool updateTags = true)
         {
-            return CreateOrUpdate(info.ToObjectInfo<T>(_serializer));
+             return CreateOrUpdate(info.ToObjectInfo<T>(_serializer), updateTags);
         }
 
         /// <summary>
@@ -438,6 +440,8 @@ namespace SharpQuant.ObjectStore
                     command.Parameters.Add(command.CreateParameter());
                     command.Parameters.Add(command.CreateParameter());
                     command.Parameters.Add(command.CreateParameter());
+                    command.Parameters.Add(command.CreateParameter());
+                    command.Parameters[i++].Value = info.DataSize;
                     command.Parameters[i++].Value = info.Data;
                     command.Parameters[i++].Value = info.ID;
                     command.Parameters[i++].Value = version;
@@ -449,14 +453,15 @@ namespace SharpQuant.ObjectStore
 
                     command.CommandText = string.Format(INSERT, info.Catalogue);
 
-                    for (int i = 0; i < 5; i++)
+                    for (int i = 0; i < 6; i++)
                         command.Parameters.Add(command.CreateParameter());
 
                     command.Parameters[0].Value = version;
                     command.Parameters[1].Value = info.ID;
                     command.Parameters[2].Value = info.Type;
                     command.Parameters[3].Value = _tagsSerializer.Serialize(info.Tags);
-                    command.Parameters[4].Value = info.Data;
+                    command.Parameters[4].Value = info.DataSize;
+                    command.Parameters[5].Value = info.Data;
                 }
 
                 int res = command.ExecuteNonQuery();
@@ -526,7 +531,8 @@ namespace SharpQuant.ObjectStore
                         info.ID = (string)reader[1];
                         info.Type = reader[2] as string;
                         info.Tags = _tagsSerializer.Deserialize(reader[3] as string);
-                        info.Data = reader[4] as byte[];
+                        info.DataSize = (int)reader[4]; 
+                        info.Data = reader[5] as byte[];
                     }
                 }
                 return info;
